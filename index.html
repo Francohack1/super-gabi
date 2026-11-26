@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-   .toast[hidden]{display:none}
+    .toast[hidden]{display:none}
 /* VOICE: práctica y cálida, para usar con una mano en el pasillo
    IDEA: la nota de la compra pegada en la nevera, ordenada por pasillos
    PICTURE: la lista misma, arriba de todo, agrupada por sección del súper
@@ -550,9 +550,18 @@ function parseJSON(t){
   const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a>=0&&b>a){try{return JSON.parse(t.slice(a,b+1))}catch(e){}}
   throw {code:'invalid_json'};
 }
+const GEM_PROXY='https://clnodhylcaigjtkmwmnl.supabase.co/functions/v1/gemini';
 async function gemini(prompt,signal){
   const key=(getPref('sg.gemkey')||'').trim();
-  if(!key)throw {code:'no_key'};
+  if(!key){
+    // IA de la casa: la clave vive en el servidor, nunca en el teléfono
+    let r;
+    try{r=await fetch(GEM_PROXY,{method:'POST',signal,headers:{'Content-Type':'application/json','apikey':SBK,'x-household':HH},body:JSON.stringify({prompt})})}
+    catch(e){if(e&&e.name==='AbortError')throw {code:'cancelled'};throw {code:'offline'}}
+    let j={};try{j=await r.json()}catch(e){}
+    if(!r.ok){throw {code:j.code==='no_casa'?'no_casa':(j.code||'upstream_error')}}
+    return parseJSON(j.text);
+  }
   let last={code:'upstream_error'};
   for(const m of GEM_MODELS){
     let r;
@@ -631,7 +640,7 @@ async function aiRaw(dish,signal){
   const ings=Array.isArray(r&&r.ingredientes)?r.ingredientes.slice(0,15).filter(i=>i&&i.nombre):[];
   return {nombre:String((r&&r.nombre)||dish).slice(0,60),ings:ings.map(i=>mkIng(String(i.nombre),String(i.cantidad||''),String(i.seccion||''),!!i.despensa))};
 }
-const AIERR={no_key:'Para usar la IA cargá tu clave gratis de Gemini en Ajustes. Las recetas base y tus comidas guardadas funcionan sin IA.',bad_key:'La clave de Gemini no es válida. Revisala en Ajustes.',offline:'Sin conexión: la IA necesita internet.',rate_limited:'Gemini llegó al límite gratis de hoy. Probá más tarde o usá una receta base.',invalid_json:'La respuesta vino rara. Tocá de nuevo.'};
+const AIERR={no_casa:'Creá al menos una lista para usar la IA.',no_key:'Para usar la IA cargá tu clave gratis de Gemini en Ajustes. Las recetas base y tus comidas guardadas funcionan sin IA.',bad_key:'La clave de Gemini no es válida. Revisala en Ajustes.',offline:'Sin conexión: la IA necesita internet.',rate_limited:'Gemini llegó al límite gratis de hoy. Probá más tarde o usá una receta base.',invalid_json:'La respuesta vino rara. Tocá de nuevo.'};
 async function runAI(dish){
   aiCtl=new AbortController();
   const box=$('aiw');
@@ -916,8 +925,8 @@ function openSettings(){
   <label for="snm">Tu nombre (aparece en lo que agregás)</label><input type="text" id="snm" data-nofocus="1" maxlength="20" value="${esc(ME())}">
   ${HH?`<label>Invitar a alguien a tu casa</label><p class="note" style="margin-top:0">Quien abra este link entra a tus listas. Mandalo sólo a la gente de tu casa.</p>
   <div class="acts" style="margin-top:6px"><button class="btn pri" type="button" data-act="cplink">Copiar link</button><a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('Te invito a nuestra lista del súper en Super Gabi: '+inviteLink())}">Mandar por WhatsApp</a></div>`:''}
-  <label for="sgk">Clave de Gemini (opcional, para comidas con IA)</label><input type="text" id="sgk" data-nofocus="1" value="${esc(k)}" placeholder="Pegá tu clave gratis" autocomplete="off" spellcheck="false">
-  <p class="note" style="margin-top:0">La sacás gratis en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Queda guardada sólo en este teléfono.</p>
+  <label for="sgk">IA para comidas: ya viene incluida. Clave propia de Gemini (opcional)</label><input type="text" id="sgk" data-nofocus="1" value="${esc(k)}" placeholder="Pegá tu clave gratis" autocomplete="off" spellcheck="false">
+  <p class="note" style="margin-top:0">Dejalo vacío para usar la IA de la casa. Sólo si querés usar otra clave: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
   ${deferredInstall?'<div class="acts"><button class="btn" data-act="install">Instalar la app</button></div>':''}
   <div class="acts"><button class="btn pri" data-act="savesettings">Guardar</button>${HH?'<button class="btn dan" data-act="leave">Salir de esta casa</button>':''}<button class="btn" data-act="close">Cerrar</button></div>`);
 }
