@@ -122,7 +122,7 @@ ul{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid va
 .think{display:flex;align-items:center;gap:10px;color:var(--mute);margin:16px 0}
 .think i{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.toast{display:flex;align-items:center;gap:14px}
+.toast{display:flex;align-items:center;gap:14px;pointer-events:none}
 .hb{border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15);color:#fff;border-radius:10px;min-height:40px;padding:0 12px;font-weight:600;font-size:14px}
 body.setup .add,body.setup nav{display:none}
 .setup-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-top:20px}
@@ -138,7 +138,7 @@ body.setup .add,body.setup nav{display:none}
 .day:first-child{border-top:0}.day strong{width:100%;font-size:14px}
 .day .pill{flex:1 1 140px;text-align:left}.day .pill.on{background:var(--note);color:var(--ink);border-color:var(--noteb)}
 #micb[hidden]{display:none}#micb.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-.toast .undo{border:0;background:none;color:var(--acc);font-weight:700;min-height:36px;padding:0 4px}
+.toast .undo{pointer-events:auto;border:0;background:none;color:var(--acc);font-weight:700;min-height:36px;padding:0 4px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -156,7 +156,7 @@ body.setup .add,body.setup nav{display:none}
   </form>
 </div></div>
 <div id="modal"></div>
-<div class="toast" id="toast" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script>
 {
 // Catálogo genérico. |M = típico de Mercadona, |L = típico de Lidl, sin marca = en los dos.
@@ -205,6 +205,8 @@ const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
 const nid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+// Id fijo por lista + producto: si dos teléfonos agregan lo mismo a la vez, queda uno solo.
+const itemId=(lid,name)=>(lid+'_'+norm(name).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')).slice(0,90)||nid();
 const CHECK='<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 function toast(msg,undo){
@@ -342,7 +344,7 @@ async function addItem(name,cat,opts={}){
   const c=cat||(p?p.cat:'Otros');
   if(!p&&!cat&&!opts.quick){openNewProd(name);return}
   if(!p){api.put('custom',nid(),{name,cat:c,store:opts.store||L.store||'A',ts:Date.now()})}
-  api.put('items',nid(),{list:L.id,name:p?p.name:name,cat:c,qty:opts.qty||1,done:false,fixed:!!opts.every,every:opts.every||0,note:'',by:ME()||null,ts:Date.now()});
+  api.put('items',itemId(L.id,p?p.name:name),{list:L.id,name:p?p.name:name,cat:c,qty:opts.qty||1,done:false,fixed:!!opts.every,every:opts.every||0,note:'',by:ME()||null,ts:Date.now()});
   if(!p&&!opts.quiet)toast(name+' agregado al catálogo');
 }
 function openNewProd(name){
@@ -723,10 +725,12 @@ async function mealToList(){
   for(const g of pick){
     if(done.has(norm(g.name)))continue;done.add(norm(g.name));
     const ex=its.find(i=>norm(i.name)===norm(g.name));
-    const note=[g.qty,'para '+(g.for?g.for.join(', '):M.name)].filter(Boolean).join(' · ').slice(0,80);
+    // Una cantidad en número va al contador (×6); una con unidad (500 g, 1 lata) queda en la nota.
+    const isNum=/^\d+$/.test(g.qty);const num=isNum?Math.max(1,Math.min(99,+g.qty)):1;
+    const note=[isNum?'':g.qty,'para '+(g.for?g.for.join(', '):M.name)].filter(Boolean).join(' · ').slice(0,80);
     if(ex&&!ex.done)continue;
-    if(ex&&ex.done){await api.patch('items',ex.id,{done:false,note});added++;continue}
-    await api.put('items',nid(),{list:L.id,name:g.name,cat:g.cat,qty:1,done:false,fixed:false,note,by:ME()||null,ts:Date.now()});added++;
+    if(ex&&ex.done){await api.patch('items',ex.id,{done:false,note,qty:num});added++;continue}
+    await api.put('items',itemId(L.id,g.name),{list:L.id,name:g.name,cat:g.cat,qty:num,done:false,fixed:false,note,by:ME()||null,ts:Date.now()});added++;
   }
   const doc={name:M.name,ings:M.ings.map(i=>({name:i.name,qty:i.qty,cat:i.cat,basic:i.basic})),ts:Date.now()};
   if(M.src!=='menu'){if(M.id)api.patch('meals',M.id,doc);else api.put('meals',nid(),doc)}
@@ -837,8 +841,8 @@ document.addEventListener('click',async e=>{
     if(!b.dataset.sure){b.dataset.sure='1';b.textContent='Tocá otra vez para borrar todo';return}
     const id=b.dataset.id;closeSheet();
     const its=itemsOf(id);
-    await api.del('lists',id);
     for(const i of its)await api.del('items',i.id);
+    await api.del('lists',id);
     S.cur=null;render();toast('Lista borrada');return;
   }
   if(a==='doweek'){
